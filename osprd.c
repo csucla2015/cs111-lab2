@@ -64,7 +64,11 @@ typedef struct osprd_info {
 
 	/* HINT: You may want to add additional fields to help
 	         in detecting deadlock. */
-
+	////////////////////////////////////////////////////////////////////////
+	/////////////////////////ADDEDBYMEET////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////	
+	unsigned reads; // To keep track of reads. Important to make it unsigned
+	unsigned writes;// To keep track of reads. Important to make it unsigned
 	// The following elements are used internally; you don't need
 	// to understand them.
 	struct request_queue *queue;    // The device request queue.
@@ -121,12 +125,44 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
 	// 'req->buffer' members, and the rq_data_dir() function.
 
 	// Your code here.
-	eprintk("Should process request...\n");
+
+	if(req->sector+req->current_nr_sectors > nsectors)
+	{
+		eprintk("Bad Sector\n");
+		end_request(req,0);
+	}
+	//Handling edge cases
+	if(req->current_nr_sectors > nsectors)
+	{
+		eprintk("Sector out of bound\n");
+		end_request(req,0);
+	}	
+	if(rq_data_dir(req) == READ)
+	{
+		//So as provided in the hint, rq_data_dir gives us the type. 
+		//So if it is a read, we need take the data from d and store 
+		//it in the buffer of req(I think)
+		//read from d->data to req->buffer
+		//I am using memcpy to do the copy, there are other possible ways to
+		memcpy(req->buffer, d->data + req->sector*SECTOR_SIZE, req->current_nr_sectors*SECTOR_SIZE);
+	} 
+	else if(rq_data_dir(req)==WRITE)
+	{
+		//Almost the same as reversing what we did in write.
+		memcpy(d->data+req->sector*SECTOR_SIZE, req->buffer, req->current_nr_sectors*SECTOR_SIZE);
+	}
+	//Then i dont know what to do with it yet
+	else
+	{
+		eprintk("Bad command\n");
+		end_request(req,0);
+	}
+	
+	// Your code here.
 
 	end_request(req, 1);
+
 }
-
-
 // This function is called when a /dev/osprdX file is opened.
 // You aren't likely to need to change this.
 static int osprd_open(struct inode *inode, struct file *filp)
@@ -152,7 +188,17 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 		// as appropriate.
 
 		// Your code here.
-
+		if(filp->f_flags & F_OSPRD_LOCKED)
+		{
+			osp_spin_lock(&d->mutex); //time to lock, this will be released later
+			filp->f_flags &= ~F_OSPRD_LOCKED;
+			if(filp_writable) // we are writing
+				d->writes--;
+			else
+				d->reads--; // we are reading
+			osp_spin_unlock(&d->mutex);//As per the hint, used to release the lock
+			wake_up_all(&d->blockq); //As per the hint, used to wake up the processed
+		}
 		// This line avoids compiler warnings; you may remove it.
 		(void) filp_writable, (void) d;
 
