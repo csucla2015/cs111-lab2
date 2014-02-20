@@ -268,9 +268,27 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// be protected by a spinlock; which ones?)
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to acquire\n");
-		r = -ENOTTY;
+		//eprintk("Attempting to acquire\n");
+		//r = -ENOTTY;
 
+		unsigned local_ticket_head = d->ticket_head; 
+
+		if(filp_writable){
+			osp_spin_lock(&d->mutex);
+			d->ticket_head++;
+			filp->f_flags |= F_OSPRD_LOCKED;		
+			d->writes++;
+
+			wait_event_interruptible(d->blockq,d->ticket_tail == local_ticket_head && d->writes == 1 && d->reads == 0);
+			osp_spin_unlock(&d->mutex);
+			d->writes--;
+			d->ticket_tail++;
+ 
+                   }
+		
+
+
+		
 	} else if (cmd == OSPRDIOCTRYACQUIRE) {
 
 		// EXERCISE: ATTEMPT to lock the ramdisk.
@@ -281,8 +299,12 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Otherwise, if we can grant the lock request, return 0.
 
 		// Your code here (instead of the next two lines).
-		eprintk("Attempting to try acquire\n");
-		r = -ENOTTY;
+		//eprintk("Attempting to try acquire\n");
+		//r = -ENOTTY;
+
+		if(filp_writable){
+			
+		}
 
 	} else if (cmd == OSPRDIOCRELEASE) {
 
