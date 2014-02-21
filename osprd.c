@@ -44,6 +44,10 @@ MODULE_AUTHOR("Akshaan Kakar + Meet Bhagdev");
 static int nsectors = 32;
 module_param(nsectors, int, 0);
 
+struct pid_node {
+	pid_t pid;
+	struct pid_node* next;
+	};
 
 /* The internal representation of our device. */
 typedef struct osprd_info {
@@ -69,6 +73,10 @@ typedef struct osprd_info {
 	////////////////////////////////////////////////////////////////////////	
 	unsigned reads; // To keep track of reads. Important to make it unsigned
 	unsigned writes;// To keep track of reads. Important to make it unsigned
+	pid_t write_lock_holder; //The process that holds the current write lock
+	struct pid_node* read_lock_list;//List of processes holding read locks.
+
+
 	// The following elements are used internally; you don't need
 	// to understand them.
 	struct request_queue *queue;    // The device request queue.
@@ -193,9 +201,27 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 			osp_spin_lock(&d->mutex); //time to lock, this will be released later
 			filp->f_flags &= ~F_OSPRD_LOCKED;
 			if(filp_writable) // we are writing
-				d->writes--;
+				{d->writes = 0; d->write_lock_holder = -1; }
 			else
-				d->reads--; // we are reading
+				{
+				d->reads = 0;
+				struct pid_node* curr = d->read_lock_list;
+				while(curr != NULL)
+				{
+					if(curr->pid == current->pid)
+					{
+						struct pid_node* temp = curr->next->next;
+						kfree(curr->next);
+						curr->next = temp;
+						break;
+					}
+					curr = curr->next;
+				}
+				
+						
+						
+				
+	}// we are reading
 			osp_spin_unlock(&d->mutex);//As per the hint, used to release the lock
 			wake_up_all(&d->blockq); //As per the hint, used to wake up the processed
 		}
@@ -271,24 +297,45 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//eprintk("Attempting to acquire\n");
 		//r = -ENOTTY;
 
-		unsigned local_ticket_head = d->ticket_head; 
+		unsigned local_ticket_head;
+		local_ticket_head = d->ticket_head;
+		
+		osp_spin_lock(&d->mutex);
+		d->ticket_head++;	
+		osp_spin_unlock(&d->mutex);
+
+		osp_spin_lock(&d->mutex);
+		if(current->pid == d->write_lock_holder)
+		{
+			osp_spin_unlock(&d->mutex);
+			return -EDEADLK;
+		}
+
+		
 
 		if(filp_writable){
-			osp_spin_lock(&d->mutex);
-			d->ticket_head++;
-			filp->f_flags |= F_OSPRD_LOCKED;		
-			d->writes++;
-
-			wait_event_interruptible(d->blockq,d->ticket_tail == local_ticket_head && d->writes == 1 && d->reads == 0);
-			osp_spin_unlock(&d->mutex);
-			d->writes--;
-			d->ticket_tail++;
- 
-                   }
+			wait_event_interruptible(d->blockq, d->writes == 0 && d->reads == 0 && local_ticket_head <= d->ticket_tail);
 		
+		osp_spin_lock(&d->mutex);
+		filp->f_flags |= F_OSPRD_LOCKED;
+		d->writes++;
+		d->write_lock_holder = current->pid;
+		d->ticket_tail++;
+		osp_spin_unlock(&d->mutex);
+
+		}
 
 
+		else {
+				wait_event_interruptible(d->blockq, d->writes == 0 && local_ticket_head <= d->ticket_tail);
 		
+		osp_spin_lock(&d->mutex);
+		filp->f_flags |= F_OSPRD_LOCKED;
+		d->reads++;
+		d->ticket_tail++;
+		osp_spin_unlock(&d->mutex);
+
+	}
 	} else if (cmd == OSPRDIOCTRYACQUIRE) {
 
 		// EXERCISE: ATTEMPT to lock the ramdisk.
@@ -301,10 +348,6 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Your code here (instead of the next two lines).
 		//eprintk("Attempting to try acquire\n");
 		//r = -ENOTTY;
-
-		if(filp_writable){
-			
-		}
 
 	} else if (cmd == OSPRDIOCRELEASE) {
 
