@@ -25,3 +25,5 @@ Apart from this, we added unsigned ints to keep track of the number of read and 
 We also added a pid_t variable to indicate the process that holds the current write lock.
 
 These fields were added to the 'osprd_info_t' structure.
+
+*** The lab2-tester.pl scripts give a permission denied error sometimes when run. This can be fixed using chmod. *** 
