@@ -392,6 +392,82 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//eprintk("Attempting to try acquire\n");
 		//r = -ENOTTY;
 
+	/*	osp_spin_lock(&d->mutex);
+		unsigned local_ticket_head;
+		local_ticket_head = d->ticket_head;
+		d->ticket_head++;	
+		osp_spin_unlock(&d->mutex);
+
+		osp_spin_lock(&d->mutex);
+		if(current->pid == d->write_lock_holder)
+		{
+			osp_spin_unlock(&d->mutex);
+			return -EBUSY;
+		}
+
+		osp_spin_unlock(&d->mutex);
+
+		if(filp_writable){
+
+			osp_spin_lock(&d->mutex);
+			struct pid_node*  curr = d->read_lock_list;
+			while (curr != NULL)
+			{
+				if(curr->pid == current->pid)
+				{
+					osp_spin_unlock(&d->mutex);
+					return -EBUSY;
+				}
+		
+				curr = curr->next;
+			}
+			osp_spin_unlock(&d->mutex);
+			
+			if(d->writes == 0 && d->reads == 0 && local_ticket_head <= d->ticket_tail) return -EBUSY;
+		
+		osp_spin_lock(&d->mutex);
+		filp->f_flags |= F_OSPRD_LOCKED;
+		d->writes++;
+		d->write_lock_holder = current->pid;
+		d->ticket_tail++;
+		osp_spin_unlock(&d->mutex);
+
+		}
+
+
+		else {
+				if( d->writes == 0 && local_ticket_head <= d->ticket_tail);
+					return -EBUSY;
+		osp_spin_lock(&d->mutex);
+		filp->f_flags |= F_OSPRD_LOCKED;
+		d->reads++;
+		d->ticket_tail++;
+
+		struct pid_node* curr = d->read_lock_list;
+		while(curr != NULL)
+		{
+			if(curr->next == NULL)
+			break;
+			curr = curr->next;
+		}
+
+		if(curr == NULL)
+		{
+			curr = kmalloc(sizeof(struct pid_node),GFP_ATOMIC);
+		curr->pid = current->pid;
+		curr->next = NULL;
+		}
+
+		else {
+		curr->next = kmalloc(sizeof(struct pid_node),GFP_ATOMIC);
+		curr->next->pid = current->pid;
+		curr->next->next = NULL;
+		}
+		osp_spin_unlock(&d->mutex);  */
+
+	//}
+				
+
 	} else if (cmd == OSPRDIOCRELEASE) {
 
 		// EXERCISE: Unlock the ramdisk.
@@ -402,7 +478,41 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// you need, and return 0.
 
 		// Your code here (instead of the next line).
-		r = -ENOTTY;
+		//r = -ENOTTY;
+		
+		osp_spin_lock(&d->mutex);
+		
+		if(!(filp->f_flags & F_OSPRD_LOCKED))
+			r =  -EINVAL;
+
+		else {
+
+		d->writes--;
+		d->write_lock_holder = -1;
+		
+		d->reads--;
+		struct pid_node* curr = d->read_lock_list;
+				while(curr != NULL)
+				{
+					if(curr->pid == current->pid)
+					{
+						if(curr->next != NULL){
+						struct pid_node* temp = curr->next->next;
+						kfree(curr->next);
+						curr->next = temp;
+						break;}
+
+						else {
+						kfree(curr);
+						break;
+						}
+					}
+					curr = curr->next;
+				}
+
+		osp_spin_unlock(&d->mutex);
+		wake_up_all(&d->mutex);
+		}
 
 	} else
 		r = -ENOTTY; /* unknown command */
