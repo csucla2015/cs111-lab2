@@ -210,10 +210,16 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 				{
 					if(curr->pid == current->pid)
 					{
+						if(curr->next != NULL){
 						struct pid_node* temp = curr->next->next;
 						kfree(curr->next);
 						curr->next = temp;
+						break;}
+
+						else {
+						kfree(curr);
 						break;
+						}
 					}
 					curr = curr->next;
 				}
@@ -297,10 +303,11 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		//eprintk("Attempting to acquire\n");
 		//r = -ENOTTY;
 
-		unsigned local_ticket_head;
-		local_ticket_head = d->ticket_head;
+		
 		
 		osp_spin_lock(&d->mutex);
+		unsigned local_ticket_head;
+		local_ticket_head = d->ticket_head;
 		d->ticket_head++;	
 		osp_spin_unlock(&d->mutex);
 
@@ -311,9 +318,24 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 			return -EDEADLK;
 		}
 
-		
+		osp_spin_unlock(&d->mutex);
 
 		if(filp_writable){
+
+			osp_spin_lock(&d->mutex);
+			struct pid_node*  curr = d->read_lock_list;
+			while (curr != NULL)
+			{
+				if(curr->pid == current->pid)
+				{
+					osp_spin_unlock(&d->mutex);
+					return -EDEADLK;
+				}
+		
+				curr = curr->next;
+			}
+			osp_spin_unlock(&d->mutex);
+			
 			wait_event_interruptible(d->blockq, d->writes == 0 && d->reads == 0 && local_ticket_head <= d->ticket_tail);
 		
 		osp_spin_lock(&d->mutex);
@@ -333,6 +355,27 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		filp->f_flags |= F_OSPRD_LOCKED;
 		d->reads++;
 		d->ticket_tail++;
+
+		struct pid_node* curr = d->read_lock_list;
+		while(curr != NULL)
+		{
+			if(curr->next == NULL)
+			break;
+			curr = curr->next;
+		}
+
+		if(curr == NULL)
+		{
+			curr = kmalloc(sizeof(struct pid_node),GFP_ATOMIC);
+		curr->pid = current->pid;
+		curr->next = NULL;
+		}
+
+		else {
+		curr->next = kmalloc(sizeof(struct pid_node),GFP_ATOMIC);
+		curr->next->pid = current->pid;
+		curr->next->next = NULL;
+		}
 		osp_spin_unlock(&d->mutex);
 
 	}
