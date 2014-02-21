@@ -15,4 +15,13 @@ akshaan@ucla.edu
 Name: Meet Bhagdev
 UId: 104079094
 meetbhagdev@ucla.edu
+
 # Add any other information you'd like us to have below this line.
+
+We used a linked list to manage the list of processes that hold read locks at any given time.
+
+Apart from this, we added unsigned ints to keep track of the number of read and write locks held.
+
+We also added a pid_t variable to indicate the process that holds the current write lock.
+
+These fields were added to the 'osprd_info_t' structure.
