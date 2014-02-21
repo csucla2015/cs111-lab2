@@ -239,30 +239,6 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-int ready_to_write(osprd_info_t *d)
-{
-if(d->reads!=0 || d->writes != 0)
-return 0;
-else
-return 1;
-
-}
-
-int ready_to_read(osprd_info_t *d)
-{
-if(d->writes != 0)
-return 0;
-else
-return 1;
-
-}
-
-
-
-/*
- * osprd_lock
- */
-
 /*
  * osprd_ioctl(inode, filp, cmd, arg)
  *   Called to perform an ioctl on the named file.
@@ -414,14 +390,28 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		if(filp_writable)
 		{
 		osp_spin_lock(&d->mutex);
-			    // Write lock
-			if(ready_to_write(d))
+
+		struct pid_node*  curr = d->read_lock_list;
+			while (curr != NULL)
+			{
+				if(curr->pid == current->pid)
+				{
+					osp_spin_unlock(&d->mutex);
+					return -EBUSY;
+				}
+		
+				curr = curr->next;
+			}
+
+			
+		
+			if(!(d->reads!=0 || d->writes != 0))
 			{
 			d->writes++;
 			filp->f_flags |= F_OSPRD_LOCKED;
 			osp_spin_lock(&d->mutex);
 			}
-				    // Acquire rejected
+			
 			else
 			{
 			osp_spin_unlock(&d->mutex);
@@ -431,15 +421,15 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		else
 		{
 		osp_spin_lock(&d->mutex);
-			    // Read lock
-		if(ready_to_read(d))
+	
+		if(!(d->writes != 0))
 		{
 		d->reads++;
 		filp->f_flags |= F_OSPRD_LOCKED;
 		osp_spin_unlock(&d->mutex);
 
 		}
-			    // Acquire rejected
+
 		else
 		{
 		osp_spin_unlock(&d->mutex);
