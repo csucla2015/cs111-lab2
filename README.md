@@ -1,1 +1,1 @@
-Kernel Module in C that implements a RAM disk. 
+Linux Kernel module in C that implements an in memory block device (ramdisk). 
